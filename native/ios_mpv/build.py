@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -68,6 +69,8 @@ def build() -> Path:
     edit(source, 'scripts/mpv/build.sh', 'patches/mpv-fix-missing-objc.patch',
          'patches/mpv-fix-missing-objc.patch\n' +
          shlex.join([sys.executable, str(HERE / 'apply.py')]) + ' "$SRC_DIR"')
+    edit(source, 'scripts/ffmpeg/meson.build', "find_program('pkgconfig')",
+         "find_program('pkg-config')")
     edit(source, 'scripts/libxml2/meson.build', 'configure_options : [',
          "configure_options : [\n        '--without-lzma',")
     edit(source, 'scripts/uchardet/meson.build', 'options.add_cmake_defines({',
@@ -84,6 +87,20 @@ def build() -> Path:
     wrapper.write_text('#!/bin/sh\nexport PKG_CONFIG_LIBDIR=/nonexistent\nexec '
                        + shlex.quote(tools['pkgconf']) + ' "$@"\n')
     wrapper.chmod(0o755)
+    # Use the iPhoneOS SDK's zlib via the cross compiler's sysroot.
+    # Otherwise Meson can resolve the macOS zlib through CMake.
+    sdk = Path(subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'],
+                                      text=True).strip())
+    zlib_header = (sdk / 'usr/include/zlib.h').read_text()
+    zlib_version = re.search(r'^#define ZLIB_VERSION "([^"]+)"', zlib_header, re.MULTILINE)
+    if zlib_version is None:
+        raise RuntimeError('Could not read the iPhoneOS SDK zlib version')
+    target_metadata = source / 'guoapp-pkgconfig/lib/pkgconfig'
+    target_metadata.mkdir(parents=True, exist_ok=True)
+    (target_metadata / 'zlib.pc').write_text(
+        'Name: zlib\nDescription: iPhoneOS SDK zlib\n'
+        f'Version: {zlib_version.group(1)}\nLibs: -lz\n'
+    )
     build_links = source / 'build/intermediate/links'
     if build_links.exists():
         shutil.rmtree(build_links)
