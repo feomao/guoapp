@@ -77,6 +77,9 @@ def build() -> Path:
          "options.add_cmake_defines({\n    'CMAKE_POLICY_VERSION_MINIMUM': '3.5',")
     edit(source, 'scripts/uchardet/meson.build', 'options.add_cmake_defines({',
          "options.add_cmake_defines({\n    'CMAKE_POLICY_VERSION_MINIMUM': '3.5',")
+    # uchardet's CMake debug build appends '.debug' to the dylib version.
+    edit(source, 'scripts/uchardet/build.sh', 'meson setup build_cross',
+         'meson setup build_cross --buildtype=release')
     edit(source, 'scripts/uchardet/build.sh', 'cmake ./subprojects/uchardet',
          'export CMAKE_POLICY_VERSION_MINIMUM=3.5\ncmake ./subprojects/uchardet')
     edit(source, 'scripts/harfbuzz/build.sh', 'cd ${SRC_DIR}',
