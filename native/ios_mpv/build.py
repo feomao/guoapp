@@ -61,7 +61,7 @@ def build() -> Path:
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
     if revision != UPSTREAM:
         raise SystemExit(f'iOS libmpv 构建器版本不符：{revision}')
-    run('git', 'restore', '--', 'Makefile', 'scripts', cwd=source)
+    run('git', 'restore', '--', 'Makefile', 'scripts', 'cross-files', cwd=source)
 
     edit(source, 'Makefile', 'BINARIES="meson ninja cmake nasm"',
          'BINARIES="meson ninja cmake"')
@@ -70,6 +70,11 @@ def build() -> Path:
          shlex.join([sys.executable, str(HERE / 'apply.py')]) + ' "$SRC_DIR"')
     edit(source, 'scripts/libxml2/meson.build', 'configure_options : [',
          "configure_options : [\n        '--without-lzma',")
+    # Meson requires an explicit CMake binary for cross-build subprojects.
+    edit(source, 'cross-files/ios-arm64.ini', '[binaries]',
+         "[binaries]\ncmake = ['cmake']")
+    edit(source, 'scripts/mbedtls/meson.build', 'options.add_cmake_defines({',
+         "options.add_cmake_defines({\n    'CMAKE_POLICY_VERSION_MINIMUM': '3.5',")
     edit(source, 'scripts/uchardet/meson.build', 'options.add_cmake_defines({',
          "options.add_cmake_defines({\n    'CMAKE_POLICY_VERSION_MINIMUM': '3.5',")
     edit(source, 'scripts/uchardet/build.sh', 'cmake ./subprojects/uchardet',
