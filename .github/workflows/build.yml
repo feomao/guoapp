@@ -55,29 +55,36 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      base_version: ${{ steps.version.outputs.base_version }}
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - id: version
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
             echo "只能从 main 分支手动发布，当前为 $GITHUB_REF。" >&2
             exit 1
           fi
-          version=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -n1)
-          if [ -z "$version" ]; then
+          base_version=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -n1)
+          if [ -z "$base_version" ]; then
             echo "pubspec.yaml 缺少 version。" >&2
             exit 1
           fi
-          tag="app-v${version//+/-}"
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || gh release view "$tag" >/dev/null 2>&1; then
-            echo "版本 $version（$tag）已发布过，请先提升 pubspec.yaml 的 version。" >&2
-            exit 1
-          fi
+          tag_prefix="app-v${base_version//+/-}-feat"
+          tags=$(git ls-remote --refs --tags origin "refs/tags/$tag_prefix*")
+          latest=0
+          while read -r _ ref; do
+            number=${ref#"refs/tags/$tag_prefix"}
+            if [[ $number =~ ^[1-9][0-9]*$ ]] && (( number > latest )); then
+              latest=$number
+            fi
+          done <<< "$tags"
+          next=$((latest + 1))
+          version="$base_version-feat$next"
+          tag="$tag_prefix$next"
+          echo "base_version=$base_version" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -276,11 +283,19 @@ jobs:
       - name: 发布 Release
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_VERSION: ${{ needs.prepare.outputs.base_version }}
           VERSION: ${{ needs.prepare.outputs.version }}
           TAG: ${{ needs.prepare.outputs.tag }}
           SIGNING_CERT_SHA256: ${{ vars.SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
+          for asset in release/*; do
+            name=${asset##*/}
+            renamed=${name/"-$BASE_VERSION-"/"-$VERSION-"}
+            if [[ "$name" != "$renamed" ]]; then
+              mv -- "$asset" "release/$renamed"
+            fi
+          done
           cat > notes.md <<EOF
           版本 ${VERSION}。安装包内置红果站源，其余站源在 设置 › 站源 › 模块管理 的模块商店安装。
 
@@ -301,7 +316,7 @@ jobs:
 
           Android 签名证书 SHA-256：${SIGNING_CERT_SHA256}
           EOF
-          changes="$(awk -v heading="## ${VERSION}" '
+          changes="$(awk -v heading="## ${BASE_VERSION}" '
             $0 == heading { found = 1; next }
             found && /^## / { exit }
             found && !started && /^[[:space:]]*$/ { next }
